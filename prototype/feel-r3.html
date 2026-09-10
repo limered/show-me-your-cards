@@ -1,0 +1,149 @@
+<!-- PROTOTYPE — throwaway for issue #4, not production. Branch: prototype/feel-4. Double-click to run. -->
+<!-- Round 3: locked on variant C (glowing dial + winner glow). The 3 variants are visual SKINS only. -->
+<!-- Rules: seat = face-down card + name beside it (no seat number); timer is session-config (not shown), timer-off = no center text; -->
+<!-- no description line; own name has a pen button; friendlier colors. Click card to vote, click a player to throw (emoji radial). -->
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-skin="A">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feel prototype R3 — skins (?variant=A|B|C)</title>
+<style>
+/* shared tokens, overridden per skin */
+:root{
+ --bg:#241b2e;--fg:#f3ecff;--accent:#ff7eb6;--accent2:#7afcff;--card:#372a47;--line:#6b5486;--felt:#3a2d52;--glow:#ff7eb6;--radius:14px;--font:ui-monospace,Menlo,Consolas,monospace}
+html[data-theme="light"]{--bg:#fff4fb;--fg:#3a2b45;--card:#ffffff;--line:#e6cce4;--felt:#ffe9f6;--fg:#4a2f52}
+/* Skin A: dreamy neon */
+html[data-skin="A"]{--accent:#ff7eb6;--accent2:#7afcff;--glow:#ff7eb6}
+/* Skin B: cosy pastel */
+html[data-skin="B"]{--bg:#fdf2e9;--fg:#5b463a;--accent:#f4978e;--accent2:#83c5be;--card:#fffaf3;--line:#e8d3bf;--felt:#f7e3d0;--glow:#f4978e;--radius:20px}
+html[data-skin="B"][data-theme="dark"]{--bg:#2e2620;--fg:#f3e6d6;--card:#40352b;--line:#6b5a49;--felt:#3a3027}
+/* Skin C: mint retro */
+html[data-skin="C"]{--bg:#10302b;--fg:#eafff7;--accent:#ffd166;--accent2:#06d6a0;--card:#173e37;--line:#2f6b5e;--felt:#1c4a41;--glow:#06d6a0;--radius:10px}
+html[data-skin="C"][data-theme="light"]{--bg:#e9fff8;--fg:#123a32;--card:#ffffff;--line:#b6e4d6;--felt:#d5f5ea}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at 30% 0%,color-mix(in srgb,var(--accent) 12%,var(--bg)),var(--bg));
+ color:var(--fg);font-family:var(--font);padding:14px;min-height:100vh;overflow-x:hidden;transition:background .3s,color .3s}
+button{font:inherit;background:var(--card);color:var(--fg);border:2px solid var(--line);border-radius:10px;padding:6px 10px;cursor:pointer;transition:.15s}
+button:hover{border-color:var(--accent)}
+.top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.who{display:flex;align-items:center;gap:8px;font-size:16px}
+.who b{color:var(--accent)}
+.pen{padding:4px 8px;border-radius:50%;line-height:1}
+#theme{border-radius:999px;font-size:16px}
+.ctrls{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+#table{position:relative;height:46vh;min-height:320px;border:none;border-radius:50%;margin:6px auto;max-width:760px;
+ background:radial-gradient(ellipse at center,var(--felt),transparent 72%);box-shadow:inset 0 0 60px color-mix(in srgb,var(--accent) 20%,transparent)}
+#table::before{content:"";position:absolute;inset:6%;border:3px dashed color-mix(in srgb,var(--line) 70%,transparent);border-radius:50%}
+.seat{position:absolute;transform:translate(-50%,-50%);display:flex;align-items:center;gap:6px;cursor:pointer}
+.seat.empty{opacity:.35;cursor:default}
+.seat .fc{width:44px;height:62px;border-radius:8px;border:2px solid var(--line);
+ background:repeating-linear-gradient(45deg,var(--card),var(--card) 6px,color-mix(in srgb,var(--accent) 22%,var(--card)) 6px,color-mix(in srgb,var(--accent) 22%,var(--card)) 12px);
+ display:flex;align-items:center;justify-content:center;font-size:18px;flex:none;box-shadow:0 3px 6px rgba(0,0,0,.25)}
+.seat.revealed .fc{background:var(--card);color:var(--accent);font-weight:bold}
+.seat.me .fc{border-color:var(--accent)}
+.seat .nm{font-size:13px;white-space:nowrap;background:color-mix(in srgb,var(--card) 80%,transparent);padding:2px 6px;border-radius:8px}
+.seat:not(.empty):not(.me):hover .fc{transform:scale(1.12);box-shadow:0 0 0 2px var(--accent)}
+.seat.win .fc{box-shadow:0 0 0 3px var(--glow),0 0 20px var(--glow)}
+#center{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;min-width:160px}
+.timer{font-size:26px;letter-spacing:2px;color:var(--accent2)}
+.dial{font-size:52px;font-weight:bold;color:var(--accent);text-shadow:0 0 22px var(--glow);line-height:1.1}
+.mean{opacity:.75;font-size:13px}
+#hand{position:relative;height:150px;margin-top:4px;display:flex;justify-content:center;align-items:flex-end}
+#hand .pc{position:absolute;bottom:0;width:64px;height:94px;border:2px solid var(--line);border-radius:12px;
+ background:linear-gradient(160deg,var(--card),color-mix(in srgb,var(--accent) 10%,var(--card)));
+ display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;transform-origin:bottom center;
+ transition:transform .12s,box-shadow .12s;box-shadow:0 4px 8px rgba(0,0,0,.3)}
+#hand .pc:hover{transform:translateY(-26px) rotate(0)!important;z-index:20;box-shadow:0 10px 20px rgba(0,0,0,.4)}
+#hand .pc.picked{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent),0 0 16px var(--glow)}
+#radial{position:fixed;z-index:80;display:none}
+#radial button{position:absolute;width:46px;height:46px;border-radius:50%;font-size:22px;padding:0;transform:translate(-50%,-50%);box-shadow:0 4px 10px rgba(0,0,0,.4)}
+#fx{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:60}
+.fly{position:absolute;font-size:34px;will-change:transform,opacity}
+pre#state{background:rgba(0,0,0,.55);color:var(--accent2);padding:8px;border-radius:10px;white-space:pre-wrap;max-height:130px;overflow:auto;font-size:11px}
+#switcher{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);background:#000;color:#fff;border:2px solid #fff;border-radius:999px;padding:6px 12px;display:flex;gap:10px;align-items:center;z-index:99}
+#switcher button{background:#222;color:#fff;border-color:#fff}
+</style>
+</head>
+<body>
+<div class="top">
+ <div class="who">You are <b id="me">fox-42</b><button class="pen" id="rename" title="change name">✎</button></div>
+ <button id="theme">☀ / ☾</button>
+</div>
+<div class="ctrls">
+ <button id="reveal">👁 reveal</button><button id="reset">↺ new round</button>
+ <span style="opacity:.6;align-self:center;font-size:12px">(demo: toggle timer to preview center)</span>
+ <button id="tdemo">▶ demo 0:10</button><button id="toff">timer off</button>
+</div>
+<div id="table"><div id="center"></div></div>
+<div id="hand"></div>
+<h3 style="margin:8px 0 2px">State (live)</h3>
+<pre id="state"></pre>
+<div id="radial"></div>
+<div id="fx"></div>
+<nav id="switcher"><button id="prev">◀</button><span id="vlabel"></span><button id="next">▶</button></nav>
+<script>
+const q=new URLSearchParams(location.search);let V=(q.get("variant")||"A").toUpperCase();if(!"ABC".includes(V))V="A";
+document.documentElement.dataset.skin=V;
+const NAMES=["A","B","C"],TITLES={A:"A — dreamy neon",B:"B — cosy pastel",C:"C — mint retro"};
+const DECK=[1,2,3,5,8,13,21]; // session-configured elsewhere
+const EMOJI=["🍅","⭐","🐸","💩","❤️","🔥"];
+const S={revealed:false,timer:{dur:0,left:0,on:false},coolUntil:0,
+ players:[["fox-42",5],["bramble-7",null],["quill-3",8],["moss-11",null],["pebble-9",5],["",null],
+ ["wren-5",3],["",null],["tansy-2",null],["",null],["hazel-8",8],["",null]].map((p,i)=>({seat:i,name:p[0],vote:p[1]}))};
+const me=()=>S.players[0], $=s=>document.querySelector(s);
+function avg(){const vs=S.players.map(p=>p.vote).filter(v=>typeof v==="number");if(!vs.length)return null;
+ const a=vs.reduce((x,y)=>x+y,0)/vs.length,up=DECK.find(c=>c>=a);return{mean:a.toFixed(2),rounded:up??DECK[DECK.length-1]};}
+function fmt(s){s=Math.max(0,Math.ceil(s));return Math.floor(s/60)+":"+String(s%60).padStart(2,"0");}
+let tickH=null;
+function setTimer(sec){clearInterval(tickH);if(sec<=0){S.timer={dur:0,left:0,on:false};draw();return;}
+ const dl=Date.now()+sec*1000;S.timer={dur:sec,left:sec,on:true};
+ tickH=setInterval(()=>{S.timer.left=(dl-Date.now())/1000;if(S.timer.left<=0){S.timer.left=0;S.timer.on=false;clearInterval(tickH);}draw();},250);draw();}
+function snapshot(){return JSON.stringify({variant:V,skin:TITLES[V],revealed:S.revealed,timerOn:S.timer.on,pickedCard:me().vote,
+ players:S.players.filter(p=>p.name).map(p=>({name:p.name,vote:S.revealed?p.vote:(p.vote==null?"—":"down")}))},null,0);}
+function centerHTML(){const a=avg();
+ const timer=S.timer.on?`<div class="timer">⏳ ${fmt(S.timer.left)}</div>`:"";
+ if(!S.revealed)return `${timer}${S.timer.on?"":"<div style='opacity:.5'>waiting for votes…</div>"}`;
+ return `${timer}${a?`<div class="dial">${a.rounded}</div><div class="mean">mean ${a.mean}</div>`:"<div class='mean'>no votes</div>"}`;}
+function renderTable(){const t=$("#table");t.innerHTML='<div id="center"></div>';$("#center").innerHTML=centerHTML();
+ const win=S.revealed&&avg()?avg().rounded:null;
+ S.players.forEach((p,i)=>{const ang=(i/12)*Math.PI*2-Math.PI/2;
+  const d=document.createElement("div");
+  d.className="seat"+(p.name?"":" empty")+(i===0?" me":"")+(S.revealed?" revealed":"")+(win!=null&&p.vote===win?" win":"");
+  d.style.left=(50+45*Math.cos(ang))+"%";d.style.top=(50+45*Math.sin(ang))+"%";
+  const face=S.revealed?(p.vote??"–"):(p.vote==null?"":"★");
+  d.innerHTML=`<div class="fc">${p.name?face:""}</div>${p.name?`<span class="nm">${p.name}</span>`:`<span class="nm">open</span>`}`;
+  if(p.name&&i!==0)d.onclick=e=>openRadial(e,i);
+  t.appendChild(d);});}
+function renderHand(){const h=$("#hand");h.innerHTML="";const n=DECK.length,spread=52;
+ DECK.forEach((c,i)=>{const rot=(i-(n-1)/2)*(spread/n);const el=document.createElement("div");
+  el.className="pc"+(me().vote===c?" picked":"");el.textContent=c;
+  el.style.transform=`rotate(${rot}deg) translateY(${Math.abs(rot)*0.7}px)`;
+  el.style.left=`calc(50% + ${(i-(n-1)/2)*46}px - 32px)`;
+  el.onclick=()=>{if(S.revealed)return;me().vote=me().vote===c?null:c;draw();};h.appendChild(el);});}
+function openRadial(e,seat){const r=$("#radial");r.style.display="block";r.style.left=e.clientX+"px";r.style.top=e.clientY+"px";
+ r.innerHTML="";EMOJI.forEach((em,i)=>{const a=(i/EMOJI.length)*Math.PI*2-Math.PI/2;const b=document.createElement("button");
+  b.textContent=em;b.style.left=(54*Math.cos(a))+"px";b.style.top=(54*Math.sin(a))+"px";
+  b.onclick=ev=>{ev.stopPropagation();r.style.display="none";throwAt(seat,em);};r.appendChild(b);});}
+document.addEventListener("click",e=>{if(!e.target.closest("#radial")&&!e.target.closest(".seat"))$("#radial").style.display="none";});
+function throwAt(seat,em){const now=Date.now();if(now<S.coolUntil)return;S.coolUntil=now+1500;
+ const host=document.querySelectorAll(".seat")[seat],r=host.getBoundingClientRect();
+ const x1=-60,y1=innerHeight*0.95,x2=r.left+r.width/2,y2=r.top+r.height/2;
+ const el=document.createElement("div");el.className="fly";el.textContent=em;$("#fx").appendChild(el);
+ const t0=performance.now(),D=850;(function f(t){const k=Math.min(1,(t-t0)/D),cx=(x1+x2)/2,cy=Math.min(y1,y2)-240;
+  const x=(1-k)*(1-k)*x1+2*(1-k)*k*cx+k*k*x2,y=(1-k)*(1-k)*y1+2*(1-k)*k*cy+k*k*y2;
+  el.style.transform=`translate(${x}px,${y}px) rotate(${k*540}deg) scale(${k<.8?1:1.5-k*.5})`;
+  el.style.opacity=k>.85?1-(k-.85)/.15:1;if(k<1)requestAnimationFrame(f);else el.remove();})(t0);}
+function draw(){$("#state").textContent=snapshot();renderTable();renderHand();$("#vlabel").textContent=TITLES[V]+" (?variant="+V+")";}
+function go(d){const i=(NAMES.indexOf(V)+d+3)%3;location.search="?variant="+NAMES[i];}
+$("#rename").onclick=()=>{const n=prompt("Your display name:",me().name);if(n){me().name=n.trim();$("#me").textContent=me().name;draw();}};
+$("#tdemo").onclick=()=>setTimer(10);$("#toff").onclick=()=>setTimer(0);
+$("#reveal").onclick=()=>{S.revealed=true;draw();};$("#reset").onclick=()=>{S.revealed=false;S.players.forEach(p=>p.vote=null);draw();};
+$("#theme").onclick=()=>{const h=document.documentElement;h.dataset.theme=h.dataset.theme==="dark"?"light":"dark";};
+$("#prev").onclick=()=>go(-1);$("#next").onclick=()=>go(1);
+addEventListener("keydown",e=>{if(/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))return;
+ if(e.key==="ArrowLeft")go(-1);if(e.key==="ArrowRight")go(1);});
+draw();
+</script>
+</body>
+</html>
