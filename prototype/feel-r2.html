@@ -1,0 +1,133 @@
+<!-- PROTOTYPE — throwaway for issue #4, not production. Branch: prototype/feel-4. Double-click to run. -->
+<!-- Round 2: all variants on the A oval-table skeleton. Differ in the fanned hand + reveal/average presentation. -->
+<!-- Rules: fanned cards at bottom = your hand; deck config is session-only (not shown here); click a seat -> emoji radial popover -> throw; theme toggle top-right. -->
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feel prototype R2 — oval table (?variant=A|B|C)</title>
+<style>
+:root{--bg:#1a1410;--fg:#f5e9d4;--accent:#ff9f43;--card:#2c2318;--line:#5a4632;--felt:#2f5d3a}
+html[data-theme="light"]{--bg:#fdf3e3;--fg:#332619;--accent:#c25e00;--card:#fff8ec;--line:#d9c39a;--felt:#7bb287}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:ui-monospace,Menlo,Consolas,monospace;padding:14px;overflow-x:hidden}
+button{font:inherit;background:var(--card);color:var(--fg);border:2px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.top h1{font-size:17px;margin:0}
+#theme{border-radius:999px}
+.ctrls{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+/* oval table */
+#table{position:relative;height:44vh;min-height:300px;border:5px solid var(--line);border-radius:50%;
+ margin:6px auto;max-width:720px;background:radial-gradient(ellipse at center,var(--felt),transparent 75%)}
+.seat{position:absolute;transform:translate(-50%,-50%);width:118px;text-align:center;
+ border:2px solid var(--line);border-radius:12px;padding:6px;background:var(--card);cursor:pointer;transition:transform .1s}
+.seat.empty{opacity:.4;border-style:dashed;cursor:default}
+.seat.me{border-color:var(--accent)}
+.seat:not(.empty):not(.me):hover{transform:translate(-50%,-50%) scale(1.07);box-shadow:0 0 0 2px var(--accent)}
+.seat .vote{font-size:20px;min-height:26px}
+#center{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;max-width:280px}
+.timer{font-size:30px;letter-spacing:2px;color:var(--accent)}
+/* fanned hand */
+#hand{position:relative;height:150px;margin-top:6px;display:flex;justify-content:center;align-items:flex-end}
+#hand .pc{position:absolute;bottom:0;width:66px;height:96px;border:2px solid var(--line);border-radius:10px;background:var(--card);
+ display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;transform-origin:bottom center;
+ transition:transform .12s, box-shadow .12s}
+#hand .pc:hover{transform:translateY(-22px) rotate(0deg)!important;z-index:20;box-shadow:0 6px 14px rgba(0,0,0,.4)}
+#hand .pc.picked{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent)}
+/* radial emoji popover */
+#radial{position:fixed;z-index:80;display:none}
+#radial button{position:absolute;width:44px;height:44px;border-radius:50%;font-size:22px;padding:0;transform:translate(-50%,-50%)}
+#fx{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:60}
+.fly{position:absolute;font-size:34px;will-change:transform,opacity}
+pre#state{background:#000;color:#0f0;padding:8px;border-radius:8px;white-space:pre-wrap;max-height:150px;overflow:auto;font-size:11px}
+#switcher{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);background:#000;color:#fff;border:2px solid #fff;border-radius:999px;padding:6px 12px;display:flex;gap:10px;align-items:center;z-index:99}
+#switcher button{background:#222;color:#fff;border-color:#fff}
+/* B result: chip strip */ .chips{display:flex;gap:4px;justify-content:center;flex-wrap:wrap;margin-top:4px}
+.chip{border:2px solid var(--line);border-radius:6px;padding:1px 6px;font-size:12px}
+/* C result: big dial */ .dial{font-size:40px;color:var(--accent);font-weight:bold}
+</style>
+</head>
+<body>
+<div class="top">
+ <div><h1>Oval table — feel R2 <small>(?variant=A|B|C)</small></h1>
+ <div><small>You are <b id="me">fox-42</b>. Click a card to vote, click another player to throw.</small></div></div>
+ <button id="theme">☀ / ☾</button>
+</div>
+<div class="ctrls">
+ <button id="tstart">▶ 2:00</button><button id="tshort">▶ 0:10</button><button id="toff">timer off</button>
+ <button id="reveal">👁 reveal</button><button id="reset">↺ new round</button>
+</div>
+<div id="table"><div id="center"></div></div>
+<div id="hand"></div>
+<h3 style="margin:6px 0 2px">State (live)</h3>
+<pre id="state"></pre>
+<div id="radial"></div>
+<div id="fx"></div>
+<nav id="switcher"><button id="prev">◀</button><span id="vlabel"></span><button id="next">▶</button></nav>
+<script>
+const q=new URLSearchParams(location.search);let V=(q.get("variant")||"A").toUpperCase();if(!"ABC".includes(V))V="A";
+const NAMES=["A","B","C"],TITLES={A:"A — center reveal",B:"B — result chip strip",C:"C — big dial + winner glow"};
+const DECK=[1,2,3,5,8,13,21]; // session-configured elsewhere; fixed here
+const EMOJI=["🍅","⭐","🐸","💩","❤️","🔥"];
+const S={revealed:false,timer:{dur:0,left:0,on:false},coolUntil:0,pick:null,
+ players:[["fox-42",5],["bramble-7",null],["quill-3",8],["moss-11",null],["pebble-9",5],["",null],
+ ["wren-5",3],["",null],["tansy-2",null],["",null],["hazel-8",8],["",null]].map((p,i)=>({seat:i,name:p[0],vote:p[1]}))};
+const me=()=>S.players[0], $=s=>document.querySelector(s);
+function avg(){const vs=S.players.map(p=>p.vote).filter(v=>typeof v==="number");if(!vs.length)return null;
+ const a=vs.reduce((x,y)=>x+y,0)/vs.length,up=DECK.find(c=>c>=a);return{mean:a.toFixed(2),rounded:up??DECK[DECK.length-1]};}
+function fmt(s){s=Math.max(0,Math.ceil(s));return Math.floor(s/60)+":"+String(s%60).padStart(2,"0");}
+let tickH=null;
+function setTimer(sec){clearInterval(tickH);if(sec<=0){S.timer={dur:0,left:0,on:false};draw();return;}
+ const dl=Date.now()+sec*1000;S.timer={dur:sec,left:sec,on:true};
+ tickH=setInterval(()=>{S.timer.left=(dl-Date.now())/1000;if(S.timer.left<=0){S.timer.left=0;S.timer.on=false;clearInterval(tickH);}draw();},250);draw();}
+function snapshot(){return JSON.stringify({variant:V,revealed:S.revealed,timer:{on:S.timer.on,left:+S.timer.left.toFixed(1)},pickedCard:me().vote,
+ players:S.players.filter(p=>p.name).map(p=>({name:p.name,vote:S.revealed?p.vote:(p.vote==null?"—":"down")}))},null,0);}
+function centerHTML(){const a=avg(),t=S.timer.on?"⏳ "+fmt(S.timer.left):"timer off";
+ if(!S.revealed)return `<div class="timer">${t}</div><div>face-down</div>`;
+ if(V==="A")return `<div class="timer">${t}</div><div>revealed</div>${a?`<div>mean ${a.mean} →</div><div class="dial">${a.rounded}</div>`:""}`;
+ if(V==="B"){const cnt={};S.players.forEach(p=>{if(typeof p.vote==="number")cnt[p.vote]=(cnt[p.vote]||0)+1;});
+  return `<div class="timer">${t}</div>${a?`<div>→ <b>${a.rounded}</b> <small>(${a.mean})</small></div>`:""}
+  <div class="chips">${Object.entries(cnt).map(([k,v])=>`<span class="chip">${k}×${v}</span>`).join("")}</div>`;}
+ if(V==="C")return `<div class="timer">${t}</div>${a?`<div>mean ${a.mean}</div><div class="dial" style="text-shadow:0 0 18px var(--accent)">${a.rounded}</div>`:""}`;}
+function renderTable(){const t=$("#table");t.innerHTML='<div id="center"></div>';$("#center").innerHTML=centerHTML();
+ const win=S.revealed&&V==="C"&&avg()?avg().rounded:null;
+ S.players.forEach((p,i)=>{const ang=(i/12)*Math.PI*2-Math.PI/2;
+  const d=document.createElement("div");d.className="seat"+(p.name?"":" empty")+(i===0?" me":"");
+  d.style.left=(50+45*Math.cos(ang))+"%";d.style.top=(50+45*Math.sin(ang))+"%";
+  const v=S.revealed?(p.vote??"–"):(p.vote==null?"·":"🂠");
+  const glow=win!=null&&p.vote===win?"box-shadow:0 0 0 3px var(--accent)":"";
+  d.style.cssText+=glow;d.innerHTML=`<b>${p.name||"open"}</b><div class="vote">${v}</div><small>seat ${i}</small>`;
+  if(p.name&&i!==0)d.onclick=e=>openRadial(e,i);
+  t.appendChild(d);});}
+function renderHand(){const h=$("#hand");h.innerHTML="";const n=DECK.length,spread=54;
+ DECK.forEach((c,i)=>{const rot=(i-(n-1)/2)*(spread/n);const el=document.createElement("div");
+  el.className="pc"+(me().vote===c?" picked":"");el.textContent=c;
+  el.style.transform=`rotate(${rot}deg) translateY(${Math.abs(rot)*0.7}px)`;
+  el.style.left=`calc(50% + ${(i-(n-1)/2)*46}px - 33px)`;
+  el.onclick=()=>{if(S.revealed)return;me().vote=me().vote===c?null:c;draw();};h.appendChild(el);});}
+function openRadial(e,seat){const r=$("#radial");r.style.display="block";r.style.left=e.clientX+"px";r.style.top=e.clientY+"px";
+ r.innerHTML="";EMOJI.forEach((em,i)=>{const a=(i/EMOJI.length)*Math.PI*2-Math.PI/2;const b=document.createElement("button");
+  b.textContent=em;b.style.left=(52*Math.cos(a))+"px";b.style.top=(52*Math.sin(a))+"px";
+  b.onclick=ev=>{ev.stopPropagation();r.style.display="none";throwAt(seat,em);};r.appendChild(b);});}
+document.addEventListener("click",e=>{if(!e.target.closest("#radial")&&!e.target.closest(".seat"))$("#radial").style.display="none";});
+function throwAt(seat,em){const now=Date.now();if(now<S.coolUntil)return;S.coolUntil=now+1500;
+ const host=document.querySelectorAll(".seat")[seat],r=host.getBoundingClientRect();
+ const x1=-60,y1=innerHeight*0.95,x2=r.left+r.width/2,y2=r.top+r.height/2;
+ const el=document.createElement("div");el.className="fly";el.textContent=em;$("#fx").appendChild(el);
+ const t0=performance.now(),D=850;(function f(t){const k=Math.min(1,(t-t0)/D),cx=(x1+x2)/2,cy=Math.min(y1,y2)-240;
+  const x=(1-k)*(1-k)*x1+2*(1-k)*k*cx+k*k*x2,y=(1-k)*(1-k)*y1+2*(1-k)*k*cy+k*k*y2;
+  el.style.transform=`translate(${x}px,${y}px) rotate(${k*540}deg) scale(${k<.8?1:1.5-k*.5})`;
+  el.style.opacity=k>.85?1-(k-.85)/.15:1;if(k<1)requestAnimationFrame(f);else el.remove();})(t0);}
+function draw(){$("#state").textContent=snapshot();renderTable();renderHand();$("#vlabel").textContent=TITLES[V]+" (?variant="+V+")";}
+function go(d){const i=(NAMES.indexOf(V)+d+3)%3;location.search="?variant="+NAMES[i];}
+$("#tstart").onclick=()=>setTimer(120);$("#tshort").onclick=()=>setTimer(10);$("#toff").onclick=()=>setTimer(0);
+$("#reveal").onclick=()=>{S.revealed=true;draw();};$("#reset").onclick=()=>{S.revealed=false;S.players.forEach(p=>p.vote=null);draw();};
+$("#theme").onclick=()=>{const h=document.documentElement;h.dataset.theme=h.dataset.theme==="dark"?"light":"dark";};
+$("#prev").onclick=()=>go(-1);$("#next").onclick=()=>go(1);
+addEventListener("keydown",e=>{if(/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))return;
+ if(e.key==="ArrowLeft")go(-1);if(e.key==="ArrowRight")go(1);});
+draw();
+</script>
+</body>
+</html>
