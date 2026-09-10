@@ -1,0 +1,128 @@
+<!-- PROTOTYPE — throwaway for issue #4, not production. Branch: prototype/feel-4. Double-click to run. -->
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feel prototype — 3 variants (?variant=A|B|C)</title>
+<style>
+:root{--bg:#1a1410;--fg:#f5e9d4;--accent:#ff9f43;--card:#2c2318;--line:#5a4632}
+html[data-theme="light"]{--bg:#fdf3e3;--fg:#332619;--accent:#c25e00;--card:#fff8ec;--line:#d9c39a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font-family:ui-monospace,Menlo,Consolas,monospace;padding:16px 16px 90px}
+button{font:inherit;background:var(--card);color:var(--fg);border:2px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer}
+button:disabled{opacity:.4;cursor:default}
+button.picked{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+.seat{border:2px solid var(--line);border-radius:10px;padding:8px;background:var(--card);min-width:110px;text-align:center}
+.seat.empty{opacity:.45;border-style:dashed}
+.seat .vote{font-size:22px;min-height:30px}
+/* A: oval table */
+#table{position:relative;height:380px;border:4px solid var(--line);border-radius:50%;margin:10px auto;max-width:640px;background:radial-gradient(ellipse at center,var(--card),transparent)}
+#table .seat{position:absolute;width:120px;transform:translate(-50%,-50%)}
+#center{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;max-width:300px}
+/* B: saloon columns */
+#saloon{display:grid;grid-template-columns:200px 1fr 140px;gap:10px}
+#saloon .col{border:2px solid var(--line);border-radius:10px;padding:8px}
+/* C: arcade grid */
+#grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+#grid .seat{min-height:110px}
+#fx{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:50}
+.fly{position:absolute;font-size:34px;will-change:transform,opacity}
+#switcher{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:#000;color:#fff;border:2px solid #fff;border-radius:999px;padding:8px 14px;display:flex;gap:12px;align-items:center;z-index:99}
+#switcher button{background:#222;color:#fff;border-color:#fff}
+pre#state{background:#000;color:#0f0;padding:10px;border-radius:8px;white-space:pre-wrap;max-height:220px;overflow:auto}
+.timer7{font-size:34px;letter-spacing:3px;color:var(--accent)}
+.timerbar{height:14px;background:var(--line);border-radius:7px;overflow:hidden}#timerfill{height:100%;background:var(--accent);width:100%}
+</style>
+</head>
+<body>
+<h1>Playful cosy retro — feel prototype <small>(?variant=A|B|C)</small></h1>
+<div class="bar">
+<button id="theme">☀/☾ toggle</button>
+<span>Deck:</span><button data-deck="fib">Fib 1,2,3,5,8,13,21</button><button data-deck="inc">1..12</button>
+<span>Timer:</span><button id="tstart">▶ 2:00</button><button id="tshort">▶ 0:10</button><button id="tstop">⏹</button><button id="toff">off</button>
+<button id="reveal">👁 reveal</button><button id="reset">↺ new round</button>
+</div>
+<div class="bar">
+<span>You are <b id="me">fox-42</b>. Vote:</span><span id="cards"></span>
+</div>
+<div class="bar">
+<span>Throw:</span><span id="emojis"></span><span>→</span><select id="target"></select>
+<button id="throw">🚀 throw</button><span id="cool"></span>
+</div>
+<div id="mount"></div>
+<h2>State (live)</h2>
+<pre id="state"></pre>
+<div id="fx"></div>
+<nav id="switcher" aria-label="prototype switcher">
+<button id="prev">◀</button><span id="vlabel"></span><button id="next">▶</button>
+</nav>
+<script>
+const q=new URLSearchParams(location.search);let V=(q.get("variant")||"A").toUpperCase();if(!"ABC".includes(V))V="A";
+const NAMES=["A","B","C"],TITLES={A:"A — Oval table",B:"B — Saloon columns",C:"C — Arcade grid"};
+const DECKS={fib:[1,2,3,5,8,13,21],inc:[1,2,3,4,5,6,7,8,9,10,11,12]};
+const S={deck:"fib",revealed:false,timer:{dur:0,left:0,on:false},coolUntil:0,
+ players:[["fox-42",5],["bramble-7",null],["quill-3",8],["moss-11",null],["pebble-9",5],["",null],["",null],["wren-5",3],["",null],["tansy-2",null],["",null],["",null]].map((p,i)=>({seat:i,name:p[0],vote:p[1]}))};
+const me=()=>S.players[0];
+const $=s=>document.querySelector(s);
+function snapshot(){return JSON.stringify({variant:V,deck:S.deck,revealed:S.revealed,timer:S.timer,players:S.players.map(p=>({seat:p.seat,name:p.name||"(empty)",vote:S.revealed?p.vote:(p.vote==null?"—":"🂠")}))},null,1)}
+function draw(){ $("#state").textContent=snapshot(); renderVariant(); }
+function avg(){ const vs=S.players.map(p=>p.vote).filter(v=>typeof v==="number"); if(!vs.length)return null;
+ const a=vs.reduce((x,y)=>x+y,0)/vs.length; const d=DECKS[S.deck]; const up=d.find(c=>c>=a);
+ return {mean:a.toFixed(2),rounded:up!=null?up:d[d.length-1]}; }
+function seatHTML(p){ const v=S.revealed?(p.vote??"–"):(p.vote==null?"·":"🂠");
+ return `<div class="seat${p.name?"":" empty"}" data-seat="${p.seat}"><div><b>${p.name||"open spot"}</b></div><div class="vote">${v}</div><div><small>seat ${p.seat}</small></div></div>`; }
+function centerHTML(){ const a=S.revealed&&avg()?`<div>mean ${avg().mean} → <b>${avg().rounded}</b></div>`:"";
+ const t=S.timer.on?("⏳ "+fmt(S.timer.left)):"timer off";
+ return `<div class="timer7">${t}</div><div>${S.revealed?"revealed — recount live":"face-down table"}</div>${a}`; }
+function fmt(s){ s=Math.max(0,Math.ceil(s)); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
+let tickH=null;
+function setTimer(sec){ clearInterval(tickH); if(sec<=0){S.timer={dur:0,left:0,on:false};draw();return;}
+ const dl=Date.now()+sec*1000; S.timer={dur:sec,left:sec,on:true};
+ tickH=setInterval(()=>{ S.timer.left=(dl-Date.now())/1000; if(S.timer.left<=0){S.timer.left=0;S.timer.on=false;clearInterval(tickH);} draw(); },250); draw(); }
+function renderVariant(){ const m=$("#mount");
+ if(V==="A"){ m.innerHTML=`<div id="table"><div id="center">${centerHTML()}</div></div>`;
+  const t=$("#table"); S.players.forEach((p,i)=>{ const a=(i/12)*Math.PI*2-Math.PI/2;
+   const d=document.createElement("div"); d.innerHTML=seatHTML(p); const s=d.firstChild;
+   s.style.left=(50+44*Math.cos(a))+"%"; s.style.top=(50+44*Math.sin(a))+"%"; t.appendChild(s); }); }
+ if(V==="B"){ const a=avg(); m.innerHTML=`<div id="saloon"><div class="col"><h3>Spots</h3>${S.players.map(seatHTML).join("")}</div>
+  <div class="col"><h3>Stage</h3><div class="timerbar"><div id="timerfill" style="width:${S.timer.on?100*S.timer.left/S.timer.dur:0}%"></div></div>
+  <p>${S.timer.on?"⏳ "+fmt(S.timer.left):"timer off"}</p><p>${S.revealed?"revealed":"face-down"}</p>
+  ${S.revealed&&a?`<h2>→ ${a.rounded} <small>(mean ${a.mean})</small></h2>`:""}</div>
+  <div class="col"><h3>Throws</h3><p>pick emoji ↑ then target ↑ then throw</p><p>rate: 1 per 1.5s</p></div></div>`; }
+ if(V==="C"){ const a=avg(); m.innerHTML=`<h3>Cabinets ${S.timer.on?"⏳ "+fmt(S.timer.left):"(timer off)"} ${S.revealed&&a?`→ <b>${a.rounded}</b> <small>mean ${a.mean}</small>`:""}</h3><div id="grid">${S.players.map(seatHTML).join("")}</div>`; }
+ $("#vlabel").textContent=TITLES[V]+" (?variant="+V+")"; syncCtrls(); }
+function syncCtrls(){ document.querySelectorAll("[data-deck]").forEach(b=>b.classList.toggle("picked",b.dataset.deck===S.deck));
+ document.querySelectorAll("#cards button").forEach(b=>b.classList.toggle("picked",me().vote===+b.dataset.c));
+ document.querySelectorAll("#emojis button").forEach(b=>b.classList.toggle("picked",b.dataset.e===pick.e)); }
+let pick={e:"🍅"};
+function throwEmoji(){ const now=Date.now(); if(now<S.coolUntil){$("#cool").textContent="cooldown "+Math.ceil((S.coolUntil-now)/1000)+"s";return;}
+ S.coolUntil=now+1500; $("#cool").textContent="";
+ const tgt=+$("#target").value; const host=document.querySelector(`[data-seat="${tgt}"]`)||document.body;
+ const r=host.getBoundingClientRect(); const x1=-60,y1=innerHeight*0.9,x2=r.left+r.width/2,y2=r.top+r.height/2;
+ const el=document.createElement("div"); el.className="fly"; el.textContent=pick.e; $("#fx").appendChild(el);
+ const t0=performance.now(),D=900;
+ (function f(t){ const k=Math.min(1,(t-t0)/D), cx=(x1+x2)/2, cy=Math.min(y1,y2)-220;
+  const x=(1-k)*(1-k)*x1+2*(1-k)*k*cx+k*k*x2, y=(1-k)*(1-k)*y1+2*(1-k)*k*cy+k*k*y2;
+  el.style.transform=`translate(${x}px,${y}px) rotate(${k*540}deg) scale(${k<.8?1:1.6-k*.6})`; el.style.opacity=k>.85?1-(k-.85)/.15:1;
+  if(k<1)requestAnimationFrame(f); else {el.remove(); draw();} })(t0); draw(); }
+function init(){ const dc=$("#cards"); DECKS[S.deck].forEach(c=>{ const b=document.createElement("button"); b.textContent=c; b.dataset.c=c;
+  b.onclick=()=>{ if(S.revealed)return; me().vote=me().vote===c?null:c; draw(); }; dc.appendChild(b); });
+ ["🍅","⭐","🐸","💩","❤️"].forEach(e=>{ const b=document.createElement("button"); b.textContent=e; b.dataset.e=e;
+  b.onclick=()=>{pick.e=e;syncCtrls();}; $("#emojis").appendChild(b); });
+ const tg=$("#target"); S.players.slice(1).filter(p=>p.name).forEach(p=>{ const o=document.createElement("option"); o.value=p.seat; o.textContent=p.name; tg.appendChild(o); });
+ document.querySelectorAll("[data-deck]").forEach(b=>b.onclick=()=>{S.deck=b.dataset.deck;location.search="?variant="+V;});
+ $("#tstart").onclick=()=>setTimer(120); $("#tshort").onclick=()=>setTimer(10);
+ $("#tstop").onclick=()=>setTimer(0); $("#toff").onclick=()=>setTimer(0);
+ $("#reveal").onclick=()=>{S.revealed=true;draw();}; $("#reset").onclick=()=>{S.revealed=false;S.players.forEach(p=>p.vote=null);draw();};
+ $("#throw").onclick=throwEmoji; $("#theme").onclick=()=>{ const h=document.documentElement;
+  h.dataset.theme=h.dataset.theme==="dark"?"light":"dark"; };
+ const go=d=>{ const i=(NAMES.indexOf(V)+d+3)%3; location.search="?variant="+NAMES[i]; };
+ $("#prev").onclick=()=>go(-1); $("#next").onclick=()=>go(1);
+ addEventListener("keydown",e=>{ if(/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))return;
+  if(e.key==="ArrowLeft")go(-1); if(e.key==="ArrowRight")go(1); });
+ draw(); }
+init();
+</script>
+</body>
+</html>
