@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
+  closeSession,
+  configureSession,
   createSession,
   fetchSessions,
   fetchSnapshot,
+  formatCountdown,
   joinSession,
   newRound,
   playCard,
+  remainingSeconds,
   renamePlayer,
   reveal,
   sessionLink,
@@ -31,7 +35,16 @@ const link = window.location.href
 const name = ref('')
 const token = ref<string | null>(roomId ? localStorage.getItem(tokenKey(roomId)) : null)
 const copied = ref(false)
+const nowMs = ref(Date.now())
+const tableFull = ref(false)
+const joinClosed = ref(false)
+const configDeck = ref('fib')
+const configCustom = ref('')
+const configTimer = ref('2m')
+const applyingConfig = ref(false)
 let poll: number | undefined
+let tick: number | undefined
+let firedFor: string | null | undefined
 
 async function loadSessions() {
   sessions.value = await fetchSessions().catch(() => [])
@@ -63,14 +76,22 @@ async function refresh() {
 async function join() {
   if (!roomId) return
   error.value = ''
+  tableFull.value = false
+  joinClosed.value = false
   try {
     const j = await joinSession(roomId, name.value.trim() || undefined)
     token.value = j.token
     localStorage.setItem(tokenKey(roomId), j.token)
     await refresh()
   } catch (e) {
-    error.value = String(e)
+    markJoinDeadEnd(String(e))
   }
+}
+
+function markJoinDeadEnd(message: string) {
+  if (message.includes('table_full')) tableFull.value = true
+  else if (message.includes('closed')) joinClosed.value = true
+  else error.value = message
 }
 
 async function copyLink() {
@@ -111,17 +132,57 @@ async function doNewRound() {
   }
 }
 
+async function applyConfig() {
+  if (!roomId) return
+  applyingConfig.value = true
+  error.value = ''
+  try {
+    const deck = configDeck.value === 'custom' ? configCustom.value : configDeck.value
+    await configureSession(roomId, deck || undefined, configTimer.value || undefined)
+    await refresh()
+  } catch (e) {
+    error.value = String(e)
+  } finally {
+    applyingConfig.value = false
+  }
+}
+
+async function doClose() {
+  if (roomId) {
+    await closeSession(roomId)
+    await refresh()
+  }
+}
+
+const remaining = computed(() => remainingSeconds(snapshot.value?.deadlineUtc ?? null, nowMs.value))
+const countdown = computed(() => formatCountdown(remaining.value))
+
+function fireAutoReveal() {
+  const snap = snapshot.value
+  if (!snap || snap.closed || snap.revealed || remaining.value !== 0) return
+  if (firedFor === snap.deadlineUtc) return
+  firedFor = snap.deadlineUtc
+  void refresh()
+}
+
 onMounted(async () => {
   if (roomId) {
     await refresh()
     poll = window.setInterval(refresh, 2000)
+    tick = window.setInterval(onTick, 1000)
   } else {
     await loadSessions()
   }
 })
 
+function onTick() {
+  nowMs.value = Date.now()
+  fireAutoReveal()
+}
+
 onUnmounted(() => {
   if (poll !== undefined) window.clearInterval(poll)
+  if (tick !== undefined) window.clearInterval(tick)
 })
 </script>
 
@@ -167,21 +228,55 @@ onUnmounted(() => {
       <header>
         <span>{{ link }}</span>
         <button @click="copyLink">{{ copied ? 'Copied!' : 'Copy link' }}</button>
+        <span v-if="snapshot" class="timer" title="Round timer">{{ countdown }}</span>
       </header>
+      <p v-if="snapshot?.closed" class="banner">This session is closed — read-only. History stays visible via this link.</p>
       <div v-if="!token">
-        <label>Display name (optional)
-          <input v-model="name" placeholder="auto-assigned if blank" />
-        </label>
-        <button @click="join">Join table</button>
+        <p v-if="tableFull" class="dead-end">
+          Table is full (12 seats) — no queue. Ask the host for a new session or
+          <a href="/">browse open sessions</a>.
+        </p>
+        <p v-else-if="joinClosed" class="dead-end">
+          This session is closed — read-only. <a href="/">Browse open sessions</a>.
+        </p>
+        <template v-else>
+          <label>Display name (optional)
+            <input v-model="name" placeholder="auto-assigned if blank" />
+          </label>
+          <button @click="join">Join table</button>
+        </template>
       </div>
       <template v-else>
-        <div class="controls">
+        <div v-if="!snapshot?.closed" class="controls">
           <label>Name
             <input v-model="name" placeholder="rename" @keyup.enter="rename" />
           </label>
           <button @click="rename">Rename</button>
           <button v-if="!snapshot?.revealed" @click="doReveal">Reveal</button>
           <button v-else @click="doNewRound">New round</button>
+          <button @click="doClose" title="Close session for everyone">Close</button>
+        </div>
+        <div v-if="!snapshot?.closed" class="controls">
+          <label>Deck
+            <select v-model="configDeck">
+              <option value="fib">Fibonacci</option>
+              <option value="inc">Incremental</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <label v-if="configDeck === 'custom'">Cards
+            <input v-model="configCustom" placeholder="1,2,4,8,16" />
+          </label>
+          <label>Timer
+            <select v-model="configTimer">
+              <option value="30s">30s</option>
+              <option value="1m">1m</option>
+              <option value="2m">2m</option>
+              <option value="5m">5m</option>
+              <option value="off">Off</option>
+            </select>
+          </label>
+          <button :disabled="applyingConfig" @click="applyConfig" title="Applies from next round">Apply for next round</button>
         </div>
 
         <ol class="seats">
@@ -206,7 +301,7 @@ onUnmounted(() => {
           <div class="mean">{{ snapshot.result.mean.toFixed(1) }}</div>
         </div>
 
-        <div class="hand">
+        <div v-if="!snapshot?.closed" class="hand">
           <button
             v-for="c in hand"
             :key="c"
@@ -242,6 +337,23 @@ onUnmounted(() => {
 .card {
   font-weight: bold;
   margin-right: 0.25rem;
+}
+.timer {
+  font-variant-numeric: tabular-nums;
+  border: 1px solid #ccc;
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  margin-left: 0.5rem;
+}
+.banner {
+  border: 1px solid #ccc;
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+}
+.dead-end {
+  border: 1px solid #ccc;
+  border-radius: 0.5rem;
+  padding: 0.5rem;
 }
 .hand {
   display: flex;
