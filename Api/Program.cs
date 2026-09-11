@@ -99,7 +99,7 @@ static string ToNpgsql(string url)
     var port = uri.Port == -1 ? 5432 : uri.Port;
     var password = credentials.Length > 1 ? Uri.UnescapeDataString(credentials[1]) : "";
     return $"Host={uri.Host};Port={port};Username={Uri.UnescapeDataString(credentials[0])};Password={password};" +
-           $"Database={uri.AbsolutePath.Trim('/')};Ssl Mode=Prefer";
+           $"Database={uri.AbsolutePath.Trim('/')};SSL Mode=Require;Trust Server Certificate=true";
 }
 
 public partial class Program;
