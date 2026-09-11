@@ -24,6 +24,7 @@ export interface Snapshot {
   timer: string
   closed: boolean
   revealed: boolean
+  deadlineUtc: string | null
   players: Seat[]
   youSpot: number | null
   youCard: string | null
@@ -97,4 +98,25 @@ export function reveal(id: string): Promise<void> {
 
 export function newRound(id: string): Promise<void> {
   return post(id, 'round', {})
+}
+
+export function configureSession(id: string, deck?: string, timer?: string): Promise<void> {
+  return post(id, 'config', { deck: deck || null, timer: timer || null })
+}
+
+export function closeSession(id: string): Promise<void> {
+  return post(id, 'close', {})
+}
+
+export function remainingSeconds(deadlineUtc: string | null, nowMs = Date.now()): number | null {
+  if (!deadlineUtc) return null
+  const left = Math.ceil((Date.parse(deadlineUtc) - nowMs) / 1000)
+  return Math.max(0, left)
+}
+
+export function formatCountdown(totalSeconds: number | null): string {
+  if (totalSeconds === null) return 'Off'
+  const m = Math.floor(totalSeconds / 60)
+  const s = String(totalSeconds % 60).padStart(2, '0')
+  return `${m}:${s}`
 }

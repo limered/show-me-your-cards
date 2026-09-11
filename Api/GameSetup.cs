@@ -56,6 +56,15 @@ public static class GameSetup
     public static string ResolveTimer(string? timer) =>
         Timers.Contains(timer) ? timer! : DefaultTimer;
 
+    public static int? TimerSeconds(string? timer) => timer switch
+    {
+        "30s" => 30,
+        "1m" => 60,
+        "2m" => 120,
+        "5m" => 300,
+        _ => null,
+    };
+
     private static string Title(string s) => char.ToUpperInvariant(s[0]) + s[1..];
 
     public static string[] Cards(string deck) =>
