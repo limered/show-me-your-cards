@@ -50,6 +50,14 @@ The factory test phase runs every test-harness.<name> command declared here. Any
 test-harness.api: dotnet test Api.Tests
 test-harness.web: npm test --prefix web
 
+## Testing Rules
+
+- Every new component or class ships with tests. Tests need not be 1:1 per function, but every code path (branch, loop, error case) must be covered.
+
+## Code Design
+
+- Keep every function's cyclomatic complexity at 10 or below. Split or extract when a function exceeds it.
+
 ## Comment Rules
 
 - only comment your code, if it's absolutely necessery for understanding the code
