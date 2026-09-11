@@ -5,6 +5,8 @@ Stack: .NET 10 minimal API (`Api`), Vue 3 + TypeScript (`web`), Postgres via EF 
 - API entrypoint is `Api/Program.cs`. Without `DATABASE_URL` it uses a local SQLite `app.db`; with `DATABASE_URL` (Render Postgres URL) it uses Npgsql with `Migrate()` at startup.
 - Web dev: `npm run dev --prefix web` (proxies `/api` to localhost:5000). Deploy: root `Dockerfile` + `render.yaml` (single service serving `wwwroot` with fallback).
 - Update this file when entrypoints or workflows change.
+- EF migrations run on Postgres in prod, so always scaffold with `DATABASE_URL` set (`dotnet ef migrations add ...`). Without it EF uses the SQLite provider and writes SQLite column types into the model snapshot, which then diffs forever as pending changes on Postgres deploys.
+- The aspnet runtime image needs `libgssapi-krb5-2` installed (Npgsql loads `libgssapi_krb5.so.2`); it's apt-installed in the `Dockerfile` runtime stage.
 
 ## Frontend Architecture
 
