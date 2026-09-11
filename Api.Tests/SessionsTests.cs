@@ -115,9 +115,113 @@ public class SessionsTests : IDisposable
             (await Client.PostAsJsonAsync("/api/sessions/nope1234/join", new { })).StatusCode);
     }
 
+    private async Task<(string Id, JoinDto A, JoinDto B)> SeatTwo(string? deck = null)
+    {
+        var session = await Read<SessionDto>(
+            await Client.PostAsJsonAsync("/api/sessions", new { deck }));
+        var a = await Read<JoinDto>(await Client.PostAsJsonAsync($"/api/sessions/{session.Id}/join", new { }));
+        var b = await Read<JoinDto>(await Client.PostAsJsonAsync($"/api/sessions/{session.Id}/join", new { }));
+        return (session.Id, a, b);
+    }
+
+    private Task<SnapshotDto> Snapshot(string id, Guid token) =>
+        Client.GetFromJsonAsync<SnapshotDto>($"/api/sessions/{id}?token={token}", Json)!;
+
+    [Fact]
+    public async Task played_cards_stay_hidden_until_reveal()
+    {
+        var (id, a, b) = await SeatTwo();
+        await Client.PostAsJsonAsync($"/api/sessions/{id}/play", new { token = a.Token, card = "5" });
+
+        var beforeReveal = await Snapshot(id, b.Token);
+        var seatA = beforeReveal.Players.Single(p => p.Spot == a.Spot);
+        Assert.True(seatA.Played);
+        Assert.Null(seatA.Card);
+        Assert.False(beforeReveal.Revealed);
+
+        var mine = await Snapshot(id, a.Token);
+        Assert.Equal("5", mine.YouCard);
+    }
+
+    [Fact]
+    public async Task reveal_shows_cards_and_averages_up_to_next_deck_card()
+    {
+        var (id, a, b) = await SeatTwo();
+        await Client.PostAsJsonAsync($"/api/sessions/{id}/play", new { token = a.Token, card = "3" });
+        await Client.PostAsJsonAsync($"/api/sessions/{id}/play", new { token = b.Token, card = "5" });
+        await Client.PostAsync($"/api/sessions/{id}/reveal", null);
+
+        var snap = await Snapshot(id, a.Token);
+        Assert.True(snap.Revealed);
+        Assert.Equal("3", snap.Players.Single(p => p.Spot == a.Spot).Card);
+        Assert.Equal("5", snap.Result!.Card);
+        Assert.Equal(4.0, snap.Result.Mean);
+        Assert.Equal(new[] { b.Spot }, snap.Result.Spots);
+    }
+
+    [Fact]
+    public async Task non_numeric_cards_are_excluded_and_empty_has_no_result()
+    {
+        var (id, a, b) = await SeatTwo();
+        await Client.PostAsJsonAsync($"/api/sessions/{id}/play", new { token = a.Token, card = "?" });
+        await Client.PostAsJsonAsync($"/api/sessions/{id}/play", new { token = b.Token, card = "coffee" });
+        await Client.PostAsync($"/api/sessions/{id}/reveal", null);
+
+        var snap = await Snapshot(id, a.Token);
+        Assert.Null(snap.Result);
+    }
+
+    [Fact]
+    public async Task new_round_clears_cards_and_reveal()
+    {
+        var (id, a, b) = await SeatTwo();
+        await Client.PostAsJsonAsync($"/api/sessions/{id}/play", new { token = a.Token, card = "5" });
+        await Client.PostAsync($"/api/sessions/{id}/reveal", null);
+        await Client.PostAsync($"/api/sessions/{id}/round", null);
+
+        var snap = await Snapshot(id, a.Token);
+        Assert.False(snap.Revealed);
+        Assert.All(snap.Players, p => Assert.False(p.Played));
+        Assert.Null(snap.YouCard);
+    }
+
+    [Fact]
+    public async Task replaying_same_card_unvotes()
+    {
+        var (id, a, _) = await SeatTwo();
+        await Client.PostAsJsonAsync($"/api/sessions/{id}/play", new { token = a.Token, card = "5" });
+        await Client.PostAsJsonAsync($"/api/sessions/{id}/play", new { token = a.Token, card = "5" });
+
+        var snap = await Snapshot(id, a.Token);
+        Assert.Null(snap.YouCard);
+    }
+
+    [Fact]
+    public async Task rename_takes_effect_and_collision_gets_fresh_name()
+    {
+        var (id, a, b) = await SeatTwo();
+        await Client.PostAsJsonAsync($"/api/sessions/{id}/rename", new { token = a.Token, name = "Ada" });
+
+        var snap = await Snapshot(id, a.Token);
+        Assert.Equal("Ada", snap.Players.Single(p => p.Spot == a.Spot).Name);
+
+        await Client.PostAsJsonAsync($"/api/sessions/{id}/rename", new { token = b.Token, name = "Ada" });
+        var snap2 = await Snapshot(id, b.Token);
+        Assert.NotEqual("Ada", snap2.Players.Single(p => p.Spot == b.Spot).Name);
+    }
+
+    [Fact]
+    public async Task token_reclaims_same_seat_on_reconnect()
+    {
+        var (id, a, _) = await SeatTwo();
+        var reconnect = await Snapshot(id, a.Token);
+        Assert.Equal(a.Spot, reconnect.YouSpot);
+    }
+
     private sealed record SessionDto(string Id, string Deck, string Timer);
     private sealed record JoinDto(Guid Token, string Name, int Spot);
-    private sealed record SeatDto(int Spot, string Name);
-    private sealed record SnapshotDto(string Id, string Deck, string Timer, bool Closed, List<SeatDto> Players, int? YouSpot);
+    private sealed record SeatDto(int Spot, string Name, bool Played, string? Card);
+    private sealed record ResultDto(string Card, double Mean, List<int> Spots);
+    private sealed record SnapshotDto(string Id, string Deck, string Timer, bool Closed, bool Revealed, List<SeatDto> Players, int? YouSpot, string? YouCard, ResultDto? Result);
     private sealed record ErrorDto(string Error);
 }
