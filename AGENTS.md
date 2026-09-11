@@ -6,6 +6,25 @@ Stack: .NET 10 minimal API (`Api`), Vue 3 + TypeScript (`web`), Postgres via EF 
 - Web dev: `npm run dev --prefix web` (proxies `/api` to localhost:5000). Deploy: root `Dockerfile` + `render.yaml` (single service serving `wwwroot` with fallback).
 - Update this file when entrypoints or workflows change.
 
+## Frontend Architecture
+
+The frontend (web) groups code semantically by feature/theme, not by kind/technology. Do not create top-level services/, models/, or components/ folders.
+
+Each theme owns a folder split by role: View/components/, View/models/, View/services/.
+Shared code lives under _shared/ (_shared/components/, _shared/models/, _shared/services/).
+Promote on second use: a component or model starts in its owning theme folder and moves to _shared/ only the first time a second theme needs it. Nothing goes in _shared/ speculatively.
+Tests live next to the tested file.
+
+Extract Components as soon as possible to reach maximum reusability. 
+
+## Backend Architecture
+
+Clean Onion Architecture
+
+Top level folders are grouped by feature and support locality of change.
+No seperate folder for services, models, etc. 
+Prefer deep modules.
+
 ## Agent skills
 
 ### Issue tracker
@@ -24,14 +43,14 @@ Single-context layout (`CONTEXT.md` + `docs/adr/` at root). See `docs/agents/dom
 
 Use the /atomic-commit skill to stage and commit changes.
 
-### Test harness
+## Test harness
 
 The factory test phase runs every test-harness.<name> command declared here. Any failure fails the run.
 
 test-harness.api: dotnet test Api.Tests
 test-harness.web: npm test --prefix web
 
-### Comment Rules
+## Comment Rules
 
 - only comment your code, if it's absolutely necessery for understanding the code
 - never describe in a comment what can be inferred from the function name or by reading the source
