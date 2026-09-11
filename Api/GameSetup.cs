@@ -57,4 +57,21 @@ public static class GameSetup
         Timers.Contains(timer) ? timer! : DefaultTimer;
 
     private static string Title(string s) => char.ToUpperInvariant(s[0]) + s[1..];
+
+    public static string[] Cards(string deck) =>
+        deck.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    public static bool IsNumeric(string card) => double.TryParse(card, out _);
+
+    public static (string Card, double Mean)? Result(string deck, IEnumerable<string> played)
+    {
+        var numbers = played.Where(IsNumeric).Select(double.Parse).ToList();
+        if (numbers.Count == 0)
+            return null;
+        var mean = numbers.Average();
+        var deckNumbers = Cards(deck).Where(IsNumeric).ToList();
+        var rounded = deckNumbers.FirstOrDefault(c => double.Parse(c) >= mean)
+                      ?? deckNumbers.LastOrDefault();
+        return rounded is null ? null : (rounded, mean);
+    }
 }
