@@ -482,7 +482,7 @@ $RECYCLE.BIN/
 *.swp
 
 # Web build output and local dev databases
-dashboard/src/web/dist/
+web/dist/
 *.db
 *.db-wal
 *.db-shm

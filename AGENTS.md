@@ -1,9 +1,9 @@
 # AGENTS.md
 
-Stack: .NET 10 minimal API (`dashboard/src/Api`), Vue 3 + TypeScript (`dashboard/src/web`), Postgres via EF Core (Npgsql in prod, SQLite file locally).
+Stack: .NET 10 minimal API (`Api`), Vue 3 + TypeScript (`web`), Postgres via EF Core (Npgsql in prod, SQLite file locally).
 
-- API entrypoint is `dashboard/src/Api/Program.cs`. Without `DATABASE_URL` it uses a local SQLite `app.db`; with `DATABASE_URL` (Render Postgres URL) it uses Npgsql with `Migrate()` at startup.
-- Web dev: `npm run dev --prefix dashboard/src/web` (proxies `/api` to localhost:5000). Deploy: root `Dockerfile` + `render.yaml` (single service serving `wwwroot` with fallback).
+- API entrypoint is `Api/Program.cs`. Without `DATABASE_URL` it uses a local SQLite `app.db`; with `DATABASE_URL` (Render Postgres URL) it uses Npgsql with `Migrate()` at startup.
+- Web dev: `npm run dev --prefix web` (proxies `/api` to localhost:5000). Deploy: root `Dockerfile` + `render.yaml` (single service serving `wwwroot` with fallback).
 - Update this file when entrypoints or workflows change.
 
 ## Agent skills
@@ -28,8 +28,8 @@ Use the /atomic-commit skill to stage and commit changes.
 
 The factory test phase runs every test-harness.<name> command declared here. Any failure fails the run.
 
-test-harness.api: dotnet test dashboard/src/Api.Tests
-test-harness.web: npm test --prefix dashboard/src/web
+test-harness.api: dotnet test Api.Tests
+test-harness.web: npm test --prefix web
 
 ### Comment Rules
 
