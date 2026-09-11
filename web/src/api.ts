@@ -1,6 +1,8 @@
 export interface Seat {
   spot: number
   name: string
+  played: boolean
+  card: string | null
 }
 
 export interface SessionSummary {
@@ -10,13 +12,22 @@ export interface SessionSummary {
   players: number
 }
 
+export interface RevealResult {
+  card: string
+  mean: number
+  spots: number[]
+}
+
 export interface Snapshot {
   id: string
   deck: string
   timer: string
   closed: boolean
+  revealed: boolean
   players: Seat[]
   youSpot: number | null
+  youCard: string | null
+  result: RevealResult | null
 }
 
 export interface JoinResult {
@@ -61,4 +72,29 @@ export function joinSession(id: string, name?: string): Promise<JoinResult> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: name || null }),
   }).then(json<JoinResult>)
+}
+
+async function post(id: string, action: string, body: object): Promise<void> {
+  const res = await fetch(`/api/sessions/${id}/${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export function playCard(id: string, token: string, card: string): Promise<void> {
+  return post(id, 'play', { token, card })
+}
+
+export function renamePlayer(id: string, token: string, name: string): Promise<void> {
+  return post(id, 'rename', { token, name: name || null })
+}
+
+export function reveal(id: string): Promise<void> {
+  return post(id, 'reveal', {})
+}
+
+export function newRound(id: string): Promise<void> {
+  return post(id, 'round', {})
 }

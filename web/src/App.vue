@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   createSession,
   fetchSessions,
   fetchSnapshot,
   joinSession,
+  newRound,
+  playCard,
+  renamePlayer,
+  reveal,
   sessionLink,
   tokenKey,
   type SessionSummary,
@@ -79,6 +83,34 @@ function seatAt(spot: number) {
   return snapshot.value?.players.find((p) => p.spot === spot)
 }
 
+const hand = computed(() => snapshot.value?.deck.split(',').map((c) => c.trim()).filter(Boolean) ?? [])
+
+async function play(card: string) {
+  if (!roomId || !token.value) return
+  await playCard(roomId, token.value, card)
+  await refresh()
+}
+
+async function rename() {
+  if (!roomId || !token.value) return
+  await renamePlayer(roomId, token.value, name.value.trim())
+  await refresh()
+}
+
+async function doReveal() {
+  if (roomId) {
+    await reveal(roomId)
+    await refresh()
+  }
+}
+
+async function doNewRound() {
+  if (roomId) {
+    await newRound(roomId)
+    await refresh()
+  }
+}
+
 onMounted(async () => {
   if (roomId) {
     await refresh()
@@ -142,13 +174,95 @@ onUnmounted(() => {
         </label>
         <button @click="join">Join table</button>
       </div>
-      <ol v-else>
-        <li v-for="spot in TABLE_SIZE" :key="spot">
-          <template v-if="seatAt(spot - 1)">🂠 {{ seatAt(spot - 1)!.name }}</template>
-          <template v-else>· empty seat</template>
-        </li>
-      </ol>
+      <template v-else>
+        <div class="controls">
+          <label>Name
+            <input v-model="name" placeholder="rename" @keyup.enter="rename" />
+          </label>
+          <button @click="rename">Rename</button>
+          <button v-if="!snapshot?.revealed" @click="doReveal">Reveal</button>
+          <button v-else @click="doNewRound">New round</button>
+        </div>
+
+        <ol class="seats">
+          <li
+            v-for="spot in TABLE_SIZE"
+            :key="spot"
+            :class="{ glow: snapshot?.result?.spots.includes(spot - 1) }"
+          >
+            <template v-if="seatAt(spot - 1)">
+              <span class="card">
+                <template v-if="snapshot?.revealed">{{ seatAt(spot - 1)!.card ?? '—' }}</template>
+                <template v-else>{{ seatAt(spot - 1)!.played ? '🂠' : '·' }}</template>
+              </span>
+              {{ seatAt(spot - 1)!.name }}
+            </template>
+            <template v-else>· empty seat</template>
+          </li>
+        </ol>
+
+        <div v-if="snapshot?.revealed && snapshot?.result" class="dial">
+          <div class="result">{{ snapshot.result.card }}</div>
+          <div class="mean">{{ snapshot.result.mean.toFixed(1) }}</div>
+        </div>
+
+        <div class="hand">
+          <button
+            v-for="c in hand"
+            :key="c"
+            :class="{ selected: snapshot?.youCard === c }"
+            @click="play(c)"
+          >
+            {{ c }}
+          </button>
+        </div>
+      </template>
       <p v-if="error">{{ error }}</p>
     </div>
   </main>
 </template>
+
+<style scoped>
+.seats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+}
+.seats li {
+  border: 1px solid #ccc;
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+}
+.glow {
+  box-shadow: 0 0 12px 2px gold;
+  border-color: gold;
+}
+.card {
+  font-weight: bold;
+  margin-right: 0.25rem;
+}
+.hand {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+.hand button.selected {
+  background: gold;
+  transform: translateY(-0.5rem);
+}
+.dial {
+  text-align: center;
+  margin: 1rem 0;
+}
+.dial .result {
+  font-size: 3rem;
+  font-weight: bold;
+  text-shadow: 0 0 12px gold;
+}
+.dial .mean {
+  opacity: 0.6;
+}
+</style>
