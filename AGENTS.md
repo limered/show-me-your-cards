@@ -52,6 +52,8 @@ The factory test phase runs every test-harness.<name> command declared here. Any
 test-harness.api: dotnet test Api.Tests
 test-harness.web: npm test --prefix web
 
+`test-harness.api` spins up a real Postgres via Testcontainers, so it needs a working Docker daemon (pulls `postgres:16-alpine`).
+
 ## Testing Rules
 
 - Every new component or class ships with tests. Tests need not be 1:1 per function, but every code path (branch, loop, error case) must be covered.
