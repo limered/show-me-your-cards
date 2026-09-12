@@ -12,7 +12,7 @@ Stack: .NET 10 minimal API (`Api`), Vue 3 + TypeScript (`web`), Postgres via EF 
 
 The frontend (web) groups code semantically by feature/theme, not by kind/technology. Do not create top-level services/, models/, or components/ folders.
 
-Each theme owns a folder split by role: View/components/, View/models/, View/services/.
+Each theme owns a folder split by role: <theme/feature/view>/components/, <theme/feature/view>/models/, <theme/feature/view>/services/, <theme/feature/view>/composables.
 Shared code lives under _shared/ (_shared/components/, _shared/models/, _shared/services/).
 Promote on second use: a component or model starts in its owning theme folder and moves to _shared/ only the first time a second theme needs it. Nothing goes in _shared/ speculatively.
 Tests live next to the tested file.
