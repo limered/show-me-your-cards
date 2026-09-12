@@ -8,6 +8,8 @@ public class Session
     public bool Closed { get; set; }
     public bool Revealed { get; set; }
     public DateTime? DeadlineUtc { get; set; }
+    public int Round { get; set; } = 1;
+    public DateTime? RoundStartedAtUtc { get; set; }
     public List<Player> Players { get; set; } = [];
 }
 
