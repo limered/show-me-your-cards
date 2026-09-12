@@ -6,24 +6,124 @@ public static class GameSetup
     public const string Fib = "1,2,3,5,8,13,21";
     public const string Incremental = "1,2,3,5,8";
     public const string DefaultTimer = "2m";
-    public static readonly string[] Timers = ["30s", "1m", "2m", "5m", "off"];
+    public static readonly IReadOnlyDictionary<string, int?> TimerDurations = new Dictionary<string, int?>
+    {
+        ["1s"] = 1,
+        ["5s"] = 5,
+        ["30s"] = 30,
+        ["1m"] = 60,
+        ["2m"] = 120,
+        ["5m"] = 300,
+        ["off"] = null,
+    };
+    public static readonly string[] Timers = [.. TimerDurations.Keys];
 
     private static readonly string[] Adjectives =
     [
-        "amber", "sleepy", "cosmic", "velvet", "fizzy", "honey", "misty", "neon", "pebble", "drowsy",
-        "maple", "jazzy", "cloudy", "ember", "fable", "ginger", "hazy", "ivory", "jolly", "kelp",
-        "lunar", "mossy", "nimble", "oat", "pastel", "quartz", "rusty", "snug", "toasty", "umber",
-        "vanilla", "wobbly", "yarn", "zesty", "birch", "cocoa", "dandy", "elm", "fern", "groovy",
-        "harbor", "inky", "jumbo", "knit", "lilac", "meadow", "noodle", "orbit", "plum", "cedar",
+        "amber",
+        "sleepy",
+        "cosmic",
+        "velvet",
+        "fizzy",
+        "honey",
+        "misty",
+        "neon",
+        "pebble",
+        "drowsy",
+        "maple",
+        "jazzy",
+        "cloudy",
+        "ember",
+        "fable",
+        "ginger",
+        "hazy",
+        "ivory",
+        "jolly",
+        "kelp",
+        "lunar",
+        "mossy",
+        "nimble",
+        "oat",
+        "pastel",
+        "quartz",
+        "rusty",
+        "snug",
+        "toasty",
+        "umber",
+        "vanilla",
+        "wobbly",
+        "yarn",
+        "zesty",
+        "birch",
+        "cocoa",
+        "dandy",
+        "elm",
+        "fern",
+        "groovy",
+        "harbor",
+        "inky",
+        "jumbo",
+        "knit",
+        "lilac",
+        "meadow",
+        "noodle",
+        "orbit",
+        "plum",
+        "cedar",
     ];
 
     private static readonly string[] Subjects =
     [
-        "panda", "otter", "mochi", "comet", "badger", "waffle", "pixel", "sprout", "lantern", "marble",
-        "turnip", "banjo", "cactus", "donut", "fiddle", "grove", "hedgehog", "igloo", "juniper", "koala",
-        "llama", "muffin", "narwhal", "onion", "pretzel", "quokka", "rover", "scone", "taco", "urchin",
-        "violet", "walrus", "xylophone", "yeti", "zephyr", "acorn", "button", "clover", "dumpling", "eclair",
-        "gopher", "hammock", "ibis", "jigsaw", "kite", "lotus", "magnet", "novel", "oven", "prism",
+        "panda",
+        "otter",
+        "mochi",
+        "comet",
+        "badger",
+        "waffle",
+        "pixel",
+        "sprout",
+        "lantern",
+        "marble",
+        "turnip",
+        "banjo",
+        "cactus",
+        "donut",
+        "fiddle",
+        "grove",
+        "hedgehog",
+        "igloo",
+        "juniper",
+        "koala",
+        "llama",
+        "muffin",
+        "narwhal",
+        "onion",
+        "pretzel",
+        "quokka",
+        "rover",
+        "scone",
+        "taco",
+        "urchin",
+        "violet",
+        "walrus",
+        "xylophone",
+        "yeti",
+        "zephyr",
+        "acorn",
+        "button",
+        "clover",
+        "dumpling",
+        "eclair",
+        "gopher",
+        "hammock",
+        "ibis",
+        "jigsaw",
+        "kite",
+        "lotus",
+        "magnet",
+        "novel",
+        "oven",
+        "prism",
     ];
 
     private const string Alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -56,14 +156,8 @@ public static class GameSetup
     public static string ResolveTimer(string? timer) =>
         Timers.Contains(timer) ? timer! : DefaultTimer;
 
-    public static int? TimerSeconds(string? timer) => timer switch
-    {
-        "30s" => 30,
-        "1m" => 60,
-        "2m" => 120,
-        "5m" => 300,
-        _ => null,
-    };
+    public static int? TimerSeconds(string? timer) =>
+        timer is not null && TimerDurations.TryGetValue(timer, out var seconds) ? seconds : null;
 
     private static string Title(string s) => char.ToUpperInvariant(s[0]) + s[1..];
 

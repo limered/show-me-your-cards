@@ -2,32 +2,31 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Testcontainers.PostgreSql;
 
 namespace Api.Tests;
 
-public class SessionsTests : IDisposable
+public class SessionsTests : IAsyncLifetime
 {
-    private readonly SqliteConnection _conn = new("DataSource=:memory:");
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly PostgreSqlContainer _pg = new PostgreSqlBuilder("postgres:16-alpine").Build();
+    private WebApplicationFactory<Program> _factory = null!;
 
-    public SessionsTests()
+    public async Task InitializeAsync()
     {
-        _conn.Open();
-        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b => b.ConfigureServices(s =>
-        {
-            var d = s.Single(x => x.ServiceType == typeof(DbContextOptions<SmycDb>));
-            s.Remove(d);
-            s.AddDbContext<SmycDb>(o => o.UseSqlite(_conn));
-        }));
+        await _pg.StartAsync();
+        Environment.SetEnvironmentVariable("DATABASE_URL", _pg.GetConnectionString());
+        _factory = new WebApplicationFactory<Program>();
+        using var scope = _factory.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<SmycDb>().Database.MigrateAsync();
     }
 
-    public void Dispose()
+    public async Task DisposeAsync()
     {
         _factory.Dispose();
-        _conn.Dispose();
+        Environment.SetEnvironmentVariable("DATABASE_URL", null);
+        await _pg.DisposeAsync();
     }
 
     private HttpClient Client => _factory.CreateClient();
@@ -53,6 +52,8 @@ public class SessionsTests : IDisposable
         var snapshot = await Client.GetFromJsonAsync<SnapshotDto>($"/api/sessions/{session.Id}", Json);
         Assert.Equal(session.Id, snapshot!.Id);
         Assert.Empty(snapshot.Players);
+        Assert.Equal(1, snapshot.Round);
+        Assert.NotNull(snapshot.RoundStartedAtUtc);
     }
 
     [Fact]
@@ -104,6 +105,28 @@ public class SessionsTests : IDisposable
         var second = await Read<JoinDto>(
             await Client.PostAsJsonAsync($"/api/sessions/{session.Id}/join", new { name = "Host" }));
         Assert.NotEqual("Host", second.Name);
+    }
+
+    [Fact]
+    public async Task join_with_existing_token_reclaims_same_seat_without_growing_the_table()
+    {
+        var session = await Read<SessionDto>(
+            await Client.PostAsJsonAsync("/api/sessions", new { }));
+        var seats = new List<JoinDto>();
+        for (var i = 0; i < 12; i++)
+            seats.Add(await Read<JoinDto>(
+                await Client.PostAsJsonAsync($"/api/sessions/{session.Id}/join", new { })));
+
+        var reclaim = await Read<JoinDto>(await Client.PostAsJsonAsync(
+            $"/api/sessions/{session.Id}/join", new { name = "Someone-Else", token = seats[3].Token }));
+        Assert.Equal(seats[3].Token, reclaim.Token);
+        Assert.Equal(seats[3].Spot, reclaim.Spot);
+        Assert.Equal(seats[3].Name, reclaim.Name);
+
+        var snapshot = await Client.GetFromJsonAsync<SnapshotDto>(
+            $"/api/sessions/{session.Id}?token={seats[3].Token}", Json);
+        Assert.Equal(12, snapshot!.Players.Count);
+        Assert.Equal(seats[3].Spot, snapshot.YouSpot);
     }
 
     [Fact]
@@ -172,9 +195,13 @@ public class SessionsTests : IDisposable
     }
 
     [Fact]
-    public async Task new_round_clears_cards_and_reveal()
+    public async Task new_round_clears_cards_and_reveal_and_broadcasts_a_new_round_event()
     {
-        var (id, a, b) = await SeatTwo();
+        var (id, a, _) = await SeatTwo();
+        var first = await Snapshot(id, a.Token);
+        Assert.Equal(1, first.Round);
+        Assert.NotNull(first.RoundStartedAtUtc);
+
         await Client.PostAsJsonAsync($"/api/sessions/{id}/play", new { token = a.Token, card = "5" });
         await Client.PostAsync($"/api/sessions/{id}/reveal", null);
         await Client.PostAsync($"/api/sessions/{id}/round", null);
@@ -183,6 +210,10 @@ public class SessionsTests : IDisposable
         Assert.False(snap.Revealed);
         Assert.All(snap.Players, p => Assert.False(p.Played));
         Assert.Null(snap.YouCard);
+        Assert.Equal(2, snap.Round);
+        Assert.NotNull(snap.RoundStartedAtUtc);
+        Assert.True(snap.RoundStartedAtUtc >= first.RoundStartedAtUtc);
+        Assert.NotNull(snap.DeadlineUtc);
     }
 
     [Fact]
@@ -218,20 +249,11 @@ public class SessionsTests : IDisposable
         Assert.Equal(a.Spot, reconnect.YouSpot);
     }
 
-    private async Task ExpireDeadline(string id)
-    {
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<SmycDb>();
-        var session = await db.Sessions.SingleAsync(s => s.Id == id);
-        session.DeadlineUtc = DateTime.UtcNow.AddSeconds(-1);
-        await db.SaveChangesAsync();
-    }
-
     [Fact]
     public async Task round_deadline_auto_reveals_on_expiry()
     {
         var session = await Read<SessionDto>(
-            await Client.PostAsJsonAsync("/api/sessions", new { timer = "30s" }));
+            await Client.PostAsJsonAsync("/api/sessions", new { timer = "5s" }));
         var a = await Read<JoinDto>(await Client.PostAsJsonAsync($"/api/sessions/{session.Id}/join", new { }));
         var b = await Read<JoinDto>(await Client.PostAsJsonAsync($"/api/sessions/{session.Id}/join", new { }));
         await Client.PostAsJsonAsync($"/api/sessions/{session.Id}/play", new { token = a.Token, card = "3" });
@@ -241,13 +263,36 @@ public class SessionsTests : IDisposable
         Assert.False(running.Revealed);
         Assert.NotNull(running.DeadlineUtc);
 
-        await ExpireDeadline(session.Id);
+        await Task.Delay(TimeSpan.FromSeconds(6));
 
         var revealed = await Snapshot(session.Id, a.Token);
         Assert.True(revealed.Revealed);
         Assert.Null(revealed.DeadlineUtc);
         Assert.Equal("3", revealed.Players.Single(p => p.Spot == a.Spot).Card);
         Assert.Equal("5", revealed.Result!.Card);
+    }
+
+    [Fact]
+    public async Task vote_after_deadline_reveals_on_play_not_on_next_poll()
+    {
+        var session = await Read<SessionDto>(
+            await Client.PostAsJsonAsync("/api/sessions", new { timer = "1s" }));
+        var a = await Read<JoinDto>(await Client.PostAsJsonAsync($"/api/sessions/{session.Id}/join", new { }));
+
+        await Task.Delay(TimeSpan.FromMilliseconds(1500));
+
+        var play = await Client.PostAsJsonAsync($"/api/sessions/{session.Id}/play", new { token = a.Token, card = "3" });
+        Assert.True(play.IsSuccessStatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<SmycDb>();
+        var stored = await db.Sessions.SingleAsync(s => s.Id == session.Id);
+        Assert.True(stored.Revealed);
+        Assert.Null(stored.DeadlineUtc);
+
+        var snap = await Snapshot(session.Id, a.Token);
+        Assert.True(snap.Revealed);
+        Assert.Equal("3", snap.Players.Single(p => p.Spot == a.Spot).Card);
     }
 
     [Fact]
@@ -340,6 +385,7 @@ public class SessionsTests : IDisposable
         Assert.False(mine.Closed);
         Assert.False(mine.Revealed);
         Assert.NotNull(mine.DeadlineUtc);
+        Assert.Equal(1, mine.Round);
         Assert.Equal(2, mine.Players.Count);
         Assert.Equal(a.Spot, mine.YouSpot);
         Assert.Equal("5", mine.YouCard);
@@ -379,10 +425,35 @@ public class SessionsTests : IDisposable
             (await Client.PostAsJsonAsync($"/api/sessions/{id}/rename", new { token = a.Token, name = "Zed" })).StatusCode);
     }
 
+    [Fact]
+    public async Task closed_session_snapshot_read_does_not_touch_last_seen()
+    {
+        var (id, a, _) = await SeatTwo();
+        await Client.PostAsJsonAsync($"/api/sessions/{id}/play", new { token = a.Token, card = "5" });
+
+        DateTime before;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SmycDb>();
+            before = (await db.Players.SingleAsync(p => p.Token == a.Token)).LastSeen;
+        }
+
+        Assert.True((await Client.PostAsync($"/api/sessions/{id}/close", null)).IsSuccessStatusCode);
+        await Snapshot(id, a.Token);
+        await Snapshot(id, a.Token);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SmycDb>();
+            var after = (await db.Players.SingleAsync(p => p.Token == a.Token)).LastSeen;
+            Assert.Equal(before, after);
+        }
+    }
+
     private sealed record SessionDto(string Id, string Deck, string Timer);
     private sealed record JoinDto(Guid Token, string Name, int Spot);
     private sealed record SeatDto(int Spot, string Name, bool Played, string? Card);
     private sealed record ResultDto(string Card, double Mean, List<int> Spots);
-    private sealed record SnapshotDto(string Id, string Deck, string Timer, bool Closed, bool Revealed, DateTime? DeadlineUtc, List<SeatDto> Players, int? YouSpot, string? YouCard, ResultDto? Result);
+    private sealed record SnapshotDto(string Id, string Deck, string Timer, bool Closed, bool Revealed, DateTime? DeadlineUtc, int Round, DateTime? RoundStartedAtUtc, List<SeatDto> Players, int? YouSpot, string? YouCard, ResultDto? Result);
     private sealed record ErrorDto(string Error);
 }
