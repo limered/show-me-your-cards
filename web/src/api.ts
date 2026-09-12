@@ -25,6 +25,8 @@ export interface Snapshot {
   closed: boolean
   revealed: boolean
   deadlineUtc: string | null
+  round: number
+  roundStartedAtUtc: string | null
   players: Seat[]
   youSpot: number | null
   youCard: string | null
@@ -67,11 +69,11 @@ export function fetchSnapshot(id: string, token?: string | null): Promise<Snapsh
   return fetch(`/api/sessions/${id}${q}`).then(json<Snapshot>)
 }
 
-export function joinSession(id: string, name?: string): Promise<JoinResult> {
+export function joinSession(id: string, name?: string, token?: string | null): Promise<JoinResult> {
   return fetch(`/api/sessions/${id}/join`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: name || null }),
+    body: JSON.stringify({ name: name || null, token: token || null }),
   }).then(json<JoinResult>)
 }
 

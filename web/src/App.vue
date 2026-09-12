@@ -18,6 +18,19 @@ import {
   type SessionSummary,
   type Snapshot,
 } from './api'
+import ClosedBanner from './RoomView/components/ClosedBanner.vue'
+import JoinDeadEnd from './RoomView/components/JoinDeadEnd.vue'
+import PlayerHand from './RoomView/components/PlayerHand.vue'
+import RoomTimer from './RoomView/components/RoomTimer.vue'
+import SessionConfigForm from './RoomView/components/SessionConfigForm.vue'
+import { TIMER_OPTIONS } from './RoomView/models/timers'
+import {
+  applyRoomConfig,
+  classifyJoinError,
+  closeRoom,
+  isNewRound,
+  shouldFireAutoReveal,
+} from './RoomView/composables/roomLogic'
 
 const TABLE_SIZE = 12
 const path = window.location.pathname
@@ -44,7 +57,8 @@ const configTimer = ref('2m')
 const applyingConfig = ref(false)
 let poll: number | undefined
 let tick: number | undefined
-let firedFor: string | null | undefined
+let lastFiredDeadlineUtc: string | null | undefined
+let seenRound: number | null = null
 
 async function loadSessions() {
   sessions.value = await fetchSessions().catch(() => [])
@@ -67,6 +81,8 @@ async function refresh() {
   if (!roomId) return
   try {
     snapshot.value = await fetchSnapshot(roomId, token.value)
+    if (isNewRound(seenRound, snapshot.value)) lastFiredDeadlineUtc = undefined
+    seenRound = snapshot.value.round
     error.value = ''
   } catch (e) {
     error.value = String(e)
@@ -79,7 +95,7 @@ async function join() {
   tableFull.value = false
   joinClosed.value = false
   try {
-    const j = await joinSession(roomId, name.value.trim() || undefined)
+    const j = await joinSession(roomId, name.value.trim() || undefined, token.value)
     token.value = j.token
     localStorage.setItem(tokenKey(roomId), j.token)
     await refresh()
@@ -89,8 +105,9 @@ async function join() {
 }
 
 function markJoinDeadEnd(message: string) {
-  if (message.includes('table_full')) tableFull.value = true
-  else if (message.includes('closed')) joinClosed.value = true
+  const kind = classifyJoinError(message)
+  if (kind === 'table_full') tableFull.value = true
+  else if (kind === 'closed') joinClosed.value = true
   else error.value = message
 }
 
@@ -137,9 +154,19 @@ async function applyConfig() {
   applyingConfig.value = true
   error.value = ''
   try {
-    const deck = configDeck.value === 'custom' ? configCustom.value : configDeck.value
-    await configureSession(roomId, deck || undefined, configTimer.value || undefined)
-    await refresh()
+    const next = await applyRoomConfig(
+      { configureSession, fetchSnapshot },
+      roomId,
+      token.value,
+      configDeck.value,
+      configCustom.value,
+      configTimer.value,
+    )
+    if (next) {
+      if (isNewRound(seenRound, next)) lastFiredDeadlineUtc = undefined
+      seenRound = next.round
+      snapshot.value = next
+    }
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -148,9 +175,12 @@ async function applyConfig() {
 }
 
 async function doClose() {
-  if (roomId) {
-    await closeSession(roomId)
-    await refresh()
+  if (!roomId) return
+  const next = await closeRoom({ closeSession, fetchSnapshot }, roomId, token.value)
+  if (next) {
+    if (isNewRound(seenRound, next)) lastFiredDeadlineUtc = undefined
+    seenRound = next.round
+    snapshot.value = next
   }
 }
 
@@ -159,9 +189,8 @@ const countdown = computed(() => formatCountdown(remaining.value))
 
 function fireAutoReveal() {
   const snap = snapshot.value
-  if (!snap || snap.closed || snap.revealed || remaining.value !== 0) return
-  if (firedFor === snap.deadlineUtc) return
-  firedFor = snap.deadlineUtc
+  if (!shouldFireAutoReveal(snap, remaining.value, lastFiredDeadlineUtc)) return
+  lastFiredDeadlineUtc = snap!.deadlineUtc
   void refresh()
 }
 
@@ -204,11 +233,7 @@ onUnmounted(() => {
         </label>
         <label>Timer
           <select v-model="timer">
-            <option value="30s">30s</option>
-            <option value="1m">1m</option>
-            <option value="2m">2m</option>
-            <option value="5m">5m</option>
-            <option value="off">Off</option>
+            <option v-for="t in TIMER_OPTIONS" :key="t" :value="t">{{ t }}</option>
           </select>
         </label>
         <button :disabled="creating" @click="create">Create session</button>
@@ -228,18 +253,12 @@ onUnmounted(() => {
       <header>
         <span>{{ link }}</span>
         <button @click="copyLink">{{ copied ? 'Copied!' : 'Copy link' }}</button>
-        <span v-if="snapshot" class="timer" title="Round timer">{{ countdown }}</span>
+        <RoomTimer v-if="snapshot" :countdown="countdown" />
       </header>
-      <p v-if="snapshot?.closed" class="banner">This session is closed — read-only. History stays visible via this link.</p>
+      <ClosedBanner :closed="snapshot?.closed === true" />
       <div v-if="!token">
-        <p v-if="tableFull" class="dead-end">
-          Table is full (12 seats) — no queue. Ask the host for a new session or
-          <a href="/">browse open sessions</a>.
-        </p>
-        <p v-else-if="joinClosed" class="dead-end">
-          This session is closed — read-only. <a href="/">Browse open sessions</a>.
-        </p>
-        <template v-else>
+        <JoinDeadEnd :table-full="tableFull" :join-closed="joinClosed" />
+        <template v-if="!tableFull && !joinClosed">
           <label>Display name (optional)
             <input v-model="name" placeholder="auto-assigned if blank" />
           </label>
@@ -256,28 +275,17 @@ onUnmounted(() => {
           <button v-else @click="doNewRound">New round</button>
           <button @click="doClose" title="Close session for everyone">Close</button>
         </div>
-        <div v-if="!snapshot?.closed" class="controls">
-          <label>Deck
-            <select v-model="configDeck">
-              <option value="fib">Fibonacci</option>
-              <option value="inc">Incremental</option>
-              <option value="custom">Custom</option>
-            </select>
-          </label>
-          <label v-if="configDeck === 'custom'">Cards
-            <input v-model="configCustom" placeholder="1,2,4,8,16" />
-          </label>
-          <label>Timer
-            <select v-model="configTimer">
-              <option value="30s">30s</option>
-              <option value="1m">1m</option>
-              <option value="2m">2m</option>
-              <option value="5m">5m</option>
-              <option value="off">Off</option>
-            </select>
-          </label>
-          <button :disabled="applyingConfig" @click="applyConfig" title="Applies from next round">Apply for next round</button>
-        </div>
+        <SessionConfigForm
+          v-if="!snapshot?.closed"
+          :config-deck="configDeck"
+          :config-custom="configCustom"
+          :config-timer="configTimer"
+          :applying-config="applyingConfig"
+          @update:config-deck="configDeck = $event"
+          @update:config-custom="configCustom = $event"
+          @update:config-timer="configTimer = $event"
+          @apply="applyConfig"
+        />
 
         <ol class="seats">
           <li
@@ -301,16 +309,12 @@ onUnmounted(() => {
           <div class="mean">{{ snapshot.result.mean.toFixed(1) }}</div>
         </div>
 
-        <div v-if="!snapshot?.closed" class="hand">
-          <button
-            v-for="c in hand"
-            :key="c"
-            :class="{ selected: snapshot?.youCard === c }"
-            @click="play(c)"
-          >
-            {{ c }}
-          </button>
-        </div>
+        <PlayerHand
+          :closed="snapshot?.closed === true"
+          :hand="hand"
+          :you-card="snapshot?.youCard"
+          @play="play"
+        />
       </template>
       <p v-if="error">{{ error }}</p>
     </div>
