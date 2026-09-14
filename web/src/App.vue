@@ -19,10 +19,15 @@ import {
   type Snapshot,
 } from './api'
 import ClosedBanner from './RoomView/components/ClosedBanner.vue'
+import EmojiFlightLayer from './RoomView/components/EmojiFlightLayer.vue'
+import EmojiRadial from './RoomView/components/EmojiRadial.vue'
 import JoinDeadEnd from './RoomView/components/JoinDeadEnd.vue'
 import PlayerHand from './RoomView/components/PlayerHand.vue'
 import RoomTimer from './RoomView/components/RoomTimer.vue'
 import SessionConfigForm from './RoomView/components/SessionConfigForm.vue'
+import { useEmojiThrows } from './RoomView/composables/emojiThrows'
+import type { ThrowEmoji } from './RoomView/models/emoji'
+import { loadTheme, saveTheme, themeAttribute, toggleMode, type ThemeMode } from './RoomView/models/theme'
 import { TIMER_OPTIONS } from './RoomView/models/timers'
 import {
   applyRoomConfig,
@@ -55,6 +60,8 @@ const configDeck = ref('fib')
 const configCustom = ref('')
 const configTimer = ref('2m')
 const applyingConfig = ref(false)
+const throws = useEmojiThrows()
+const theme = ref<ThemeMode>('dark')
 let poll: number | undefined
 let tick: number | undefined
 let lastFiredDeadlineUtc: string | null | undefined
@@ -122,6 +129,34 @@ function seatAt(spot: number) {
 }
 
 const hand = computed(() => snapshot.value?.deck.split(',').map((c) => c.trim()).filter(Boolean) ?? [])
+const ownName = computed(
+  () => snapshot.value?.players.find((p) => p.spot === snapshot.value?.youSpot)?.name ?? '',
+)
+
+function applyTheme() {
+  document.documentElement.dataset.theme = themeAttribute(theme.value)
+}
+
+function toggleTheme() {
+  theme.value = toggleMode(theme.value)
+  saveTheme(localStorage, theme.value)
+  applyTheme()
+}
+
+function onSeatClick(event: MouseEvent, spot: number) {
+  if (!snapshot.value || snapshot.value.closed) return
+  if (!seatAt(spot)) return
+  throws.openRadial(event.clientX, event.clientY, spot, snapshot.value.youSpot)
+}
+
+function onPickEmoji(emoji: ThrowEmoji) {
+  const from = snapshot.value?.youSpot
+  if (from === null || from === undefined) {
+    throws.closeRadial()
+    return
+  }
+  throws.pickEmoji(emoji, from)
+}
 
 async function play(card: string) {
   if (!roomId || !token.value) return
@@ -195,6 +230,8 @@ function fireAutoReveal() {
 }
 
 onMounted(async () => {
+  theme.value = loadTheme(localStorage)
+  applyTheme()
   if (roomId) {
     await refresh()
     poll = window.setInterval(refresh, 2000)
@@ -218,7 +255,12 @@ onUnmounted(() => {
 <template>
   <main>
     <div v-if="!roomId">
-      <h1>Show me your cards</h1>
+      <header class="room-bar">
+        <h1>Show me your cards</h1>
+        <button class="theme-toggle" @click="toggleTheme" :title="`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`">
+          {{ theme === 'dark' ? '☀️ Light' : '🌙 Dark' }}
+        </button>
+      </header>
       <section>
         <h2>New session</h2>
         <label>Deck
@@ -250,10 +292,23 @@ onUnmounted(() => {
     </div>
 
     <div v-else>
-      <header>
-        <span>{{ link }}</span>
-        <button @click="copyLink">{{ copied ? 'Copied!' : 'Copy link' }}</button>
-        <RoomTimer v-if="snapshot" :countdown="countdown" />
+      <header class="room-bar">
+        <div class="me">
+          <span class="me-label">You</span>
+          <strong class="me-name">{{ ownName || '…' }}</strong>
+          <input v-model="name" placeholder="rename" @keyup.enter="rename" aria-label="Rename yourself" />
+          <button @click="rename">Rename</button>
+        </div>
+        <div class="link">
+          <span>{{ link }}</span>
+          <button @click="copyLink">{{ copied ? 'Copied!' : 'Copy link' }}</button>
+        </div>
+        <div class="bar-right">
+          <RoomTimer v-if="snapshot && remaining !== null" :countdown="countdown" />
+          <button class="theme-toggle" @click="toggleTheme" :title="`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`">
+            {{ theme === 'dark' ? '☀️ Light' : '🌙 Dark' }}
+          </button>
+        </div>
       </header>
       <ClosedBanner :closed="snapshot?.closed === true" />
       <div v-if="!token">
@@ -267,10 +322,6 @@ onUnmounted(() => {
       </div>
       <template v-else>
         <div v-if="!snapshot?.closed" class="controls">
-          <label>Name
-            <input v-model="name" placeholder="rename" @keyup.enter="rename" />
-          </label>
-          <button @click="rename">Rename</button>
           <button v-if="!snapshot?.revealed" @click="doReveal">Reveal</button>
           <button v-else @click="doNewRound">New round</button>
           <button @click="doClose" title="Close session for everyone">Close</button>
@@ -291,7 +342,9 @@ onUnmounted(() => {
           <li
             v-for="spot in TABLE_SIZE"
             :key="spot"
+            :data-seat="spot - 1"
             :class="{ glow: snapshot?.result?.spots.includes(spot - 1) }"
+            @click="onSeatClick($event, spot - 1)"
           >
             <template v-if="seatAt(spot - 1)">
               <span class="card">
@@ -315,13 +368,140 @@ onUnmounted(() => {
           :you-card="snapshot?.youCard"
           @play="play"
         />
+        <EmojiRadial
+          v-if="throws.radial.value"
+          :x="throws.radial.value.x"
+          :y="throws.radial.value.y"
+          @pick="onPickEmoji"
+          @close="throws.closeRadial()"
+        />
+        <EmojiFlightLayer :flights="throws.flights.value" @done="throws.finishFlight" />
       </template>
       <p v-if="error">{{ error }}</p>
     </div>
   </main>
 </template>
 
+<style>
+:root,
+[data-theme='dreamy-neon-dark'] {
+  --bg: #14101f;
+  --bg-soft: #1e1633;
+  --surface: #221a3d;
+  --ink: #f3ecff;
+  --muted: #b9a8e6;
+  --neon: #c084fc;
+  --neon-hot: #f472b6;
+  --neon-glow: rgba(192, 132, 252, 0.55);
+  --gold: #ffd75e;
+  --line: #4c3d7a;
+}
+[data-theme='dreamy-neon-light'] {
+  --bg: #fdf4ff;
+  --bg-soft: #fae8ff;
+  --surface: #ffffff;
+  --ink: #3b0764;
+  --muted: #7e22ce;
+  --neon: #a21caf;
+  --neon-hot: #db2777;
+  --neon-glow: rgba(219, 39, 119, 0.25);
+  --gold: #b45309;
+  --line: #e9d5ff;
+}
+html {
+  background: var(--bg);
+}
+body {
+  margin: 0;
+  background:
+    radial-gradient(60rem 30rem at 15% -5%, rgba(192, 132, 252, 0.25), transparent),
+    radial-gradient(50rem 26rem at 90% 0%, rgba(244, 114, 182, 0.2), transparent),
+    var(--bg);
+  color: var(--ink);
+  font-family: ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
+}
+a {
+  color: var(--neon-hot);
+}
+button {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+}
+button:hover {
+  border-color: var(--neon);
+  box-shadow: 0 0 10px var(--neon-glow);
+}
+input,
+select {
+  background: var(--bg-soft);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.3rem 0.5rem;
+}
+</style>
+
 <style scoped>
+main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1rem;
+  min-height: 100vh;
+}
+.room-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  box-shadow: 0 0 22px var(--neon-glow);
+}
+.me {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.me-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.me-name {
+  text-shadow: 0 0 12px var(--neon-glow);
+}
+.link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.bar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.theme-toggle {
+  white-space: nowrap;
+}
+.controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.75rem 0;
+  flex-wrap: wrap;
+}
 .seats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -330,13 +510,20 @@ onUnmounted(() => {
   padding: 0;
 }
 .seats li {
-  border: 1px solid #ccc;
-  border-radius: 0.5rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  border-radius: 0.75rem;
   padding: 0.5rem;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.seats li:hover {
+  border-color: var(--neon);
+  box-shadow: 0 0 14px var(--neon-glow);
 }
 .glow {
-  box-shadow: 0 0 12px 2px gold;
-  border-color: gold;
+  box-shadow: 0 0 12px 2px var(--gold);
+  border-color: var(--gold);
 }
 .card {
   font-weight: bold;
@@ -344,20 +531,23 @@ onUnmounted(() => {
 }
 .timer {
   font-variant-numeric: tabular-nums;
-  border: 1px solid #ccc;
+  border: 1px solid var(--neon);
   border-radius: 0.5rem;
   padding: 0.25rem 0.5rem;
   margin-left: 0.5rem;
+  text-shadow: 0 0 10px var(--neon-glow);
 }
 .banner {
-  border: 1px solid #ccc;
-  border-radius: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
   padding: 0.5rem;
+  background: var(--surface);
 }
 .dead-end {
-  border: 1px solid #ccc;
-  border-radius: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
   padding: 0.5rem;
+  background: var(--surface);
 }
 .hand {
   display: flex;
@@ -366,8 +556,10 @@ onUnmounted(() => {
   margin-top: 1rem;
 }
 .hand button.selected {
-  background: gold;
+  background: var(--gold);
+  color: #221a00;
   transform: translateY(-0.5rem);
+  box-shadow: 0 0 14px var(--gold);
 }
 .dial {
   text-align: center;
@@ -376,7 +568,7 @@ onUnmounted(() => {
 .dial .result {
   font-size: 3rem;
   font-weight: bold;
-  text-shadow: 0 0 12px gold;
+  text-shadow: 0 0 18px var(--neon-hot), 0 0 34px var(--neon-glow);
 }
 .dial .mean {
   opacity: 0.6;
